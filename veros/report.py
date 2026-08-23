@@ -86,7 +86,7 @@ def main() -> None:
     parser.add_argument(
         "--overview",
         help="markdown，內嵌為「摘要」章的協定理解：協定怎麼運作、資產保管、角色與權限。"
-             "未指定時取 ./audit/overview.md（veros init 產的範本位置）",
+             "未指定時取 ./audit/overview.md；該檔若仍是未填寫的範本則視同未提供",
     )
     parser.add_argument(
         "--scope-note",
@@ -133,11 +133,16 @@ def main() -> None:
                     setattr(args, flag, candidate)
     # The two hand-written documents live at fixed names under audit/ because
     # `veros init` puts them there; naming them on every run is noise.
+    sys.path.insert(0, SCRIPTS_DIR)
+    import init_audit  # noqa: E402
     for flag, default in (
         ("overview", os.path.join("audit", "overview.md")),
         ("scope_note", os.path.join("audit", "scope_note.md")),
     ):
-        if not getattr(args, flag) and os.path.isfile(default):
+        # An untouched template is not content. Inlining one would put the
+        # guidance comments in front of the client; the report has a proper
+        # "未提供" placeholder for this case.
+        if not getattr(args, flag) and not init_audit.is_unfilled(default):
             setattr(args, flag, default)
 
     if not args.before:

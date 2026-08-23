@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Step -1: scaffold the two markdown files the report needs a human to write.
+"""The two markdown files the report needs a human to write.
+
+Not a step anyone runs. `veros run` calls ensure_scaffold() and creates
+whichever is missing, because a separate scaffolding command is one more thing
+to forget — and forgetting it produced reports with no protocol description at
+all, which was the failure this was meant to prevent.
 
 `cli.py report` takes --overview and --scope-note as free-form markdown, and
 both have a shape the report depends on: --overview supplies the "摘要" chapter's
@@ -15,6 +20,7 @@ Existing files are never overwritten — this is safe to re-run.
 """
 import argparse
 import os
+import re
 import sys
 
 OVERVIEW_TEMPLATE = """## 協定概要
@@ -80,6 +86,39 @@ def write_template(path: str, content: str) -> str:
     return f"已建立：{path}"
 
 
+def ensure_scaffold(audit_dir: str) -> list:
+    """Create whatever is missing. Returns the paths actually written."""
+    created = []
+    for name, content in (("overview.md", OVERVIEW_TEMPLATE),
+                          ("scope_note.md", SCOPE_NOTE_TEMPLATE)):
+        path = os.path.join(audit_dir, name)
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            created.append(path)
+    return created
+
+
+TEMPLATES = {"overview.md": OVERVIEW_TEMPLATE, "scope_note.md": SCOPE_NOTE_TEMPLATE}
+
+
+def is_unfilled(path: str) -> bool:
+    """True when the file is missing or byte-identical to what we scaffolded.
+
+    Compared against the template rather than inspected for "looks empty":
+    the templates carry placeholder prose (`本次檢測範圍為 <目錄> 下的 <N> 個
+    檔案`, a specimen table row) which any heuristic reads as content. Exact
+    comparison has no false positives in the direction that matters — touch it
+    at all and it counts as yours. Unfilled means the report treats the section
+    as not provided, rather than printing the guidance comments at the client."""
+    if not os.path.isfile(path):
+        return True
+    template = TEMPLATES.get(os.path.basename(path))
+    if template is None:
+        return False
+    with open(path, encoding="utf-8") as f:
+        return f.read() == template
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter

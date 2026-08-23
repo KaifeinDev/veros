@@ -3,7 +3,6 @@
 
 Subcommands:
     run      the whole pipeline end to end, with the AI drafting Step 2
-    init     scaffold the audit/ markdown the report expects a human to write
     config   model and API key for the AI step
     docs     show the methodology that ships with Veros (scenario library, ...)
     doctor   Step 0 - environment health check (is this project scannable)
@@ -40,7 +39,6 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 SUBCOMMANDS = {
     "run": "run.py",
-    "init": "init_audit.py",
     "config": "config.py",
     "docs": "docs.py",
     "doctor": "env_check.py",

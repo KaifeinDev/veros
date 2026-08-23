@@ -27,10 +27,31 @@ for.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import init_audit  # noqa: E402
+
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def detect_src_prefix() -> str:
+    """Where this project keeps its contracts.
+
+    Defaulting to src/ was wrong for every Hardhat-shaped project and for isle,
+    which uses contracts/ — and the failure was a scan of nothing rather than an
+    error, so it looked like a clean codebase."""
+    if os.path.isfile("foundry.toml"):
+        with open("foundry.toml", encoding="utf-8", errors="replace") as f:
+            m = re.search(r'^\s*src\s*=\s*["\']([^"\']+)["\']', f.read(), re.M)
+        if m and os.path.isdir(m.group(1)):
+            return m.group(1).rstrip("/") + "/"
+    for candidate in ("src", "contracts"):
+        if os.path.isdir(candidate):
+            return candidate + "/"
+    return "src/"
 
 
 def step(title: str, script: str, argv: list, fatal: bool = True) -> int:
@@ -45,7 +66,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--src-prefix", action="append", default=[], help="原始碼目錄，可重複，預設 src/")
+    parser.add_argument(
+        "--src-prefix", action="append", default=[],
+        help="原始碼目錄，可重複。未指定時依 foundry.toml 的 src 設定推測，"
+             "再退而找 src/ 或 contracts/",
+    )
     parser.add_argument("--exclude-path", action="append", default=[], help="排除的路徑前綴，可重複")
     parser.add_argument("--full-audit", action="store_true", help="連相依套件的發現也保留")
     parser.add_argument("--audit-dir", default="audit", help="所有產物的根目錄，預設 ./audit")
@@ -70,7 +95,14 @@ def main() -> None:
 
     scan_dir = os.path.join(args.audit_dir, "scan")
     classification = os.path.join(scan_dir, "classification.json")
-    src_prefixes = args.src_prefix or ["src/"]
+    src_prefixes = args.src_prefix or [detect_src_prefix()]
+
+    # Create the hand-written documents if they are not there yet. A separate
+    # scaffolding command was one more thing to forget, and forgetting it
+    # shipped reports with no protocol description — the exact gap it existed
+    # to close.
+    for path in init_audit.ensure_scaffold(args.audit_dir):
+        print(f"已建立 {path}（尚未填寫）", file=sys.stderr)
 
     def finish():
         """Steps 2b and 3 — shared by the API path and the --apply resume."""

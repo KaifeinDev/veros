@@ -283,6 +283,27 @@ def run_slither(project_dir, raw_json_path):
             f"slither did not produce {raw_json_path}\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
         )
 
+    # A compile failure still writes a well-formed JSON file — `success: false`
+    # with an empty detector list. Left unchecked it reads downstream as a clean
+    # codebase, and the report says so: a scan of nothing is indistinguishable
+    # from nothing to find. Refuse rather than let that reach a client.
+    with open(raw_json_path, encoding="utf-8") as fh:
+        try:
+            raw = json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"slither 的輸出不是合法 JSON：{exc}")
+    if raw.get("success") is False:
+        raise SystemExit(
+            "slither 沒有成功分析這個專案，因此「0 筆發現」不代表程式碼乾淨。\n\n"
+            f"  錯誤：{raw.get('error')}\n\n"
+            "常見原因與處理：\n"
+            "  * 型別／名稱解析失敗（例如 library 與 contract 同名）—— slither 的名稱解析會解到\n"
+            "    contract 上。可在本機暫時把衝突的識別字改名、掃完還原，並在報告以\n"
+            "    audit/scope_note.md 揭露這次偏離（改名不改邏輯，行號與發現內容不受影響）。\n"
+            "  * 編譯不過 —— 先跑 `veros doctor` 看是相依套件還是 solc 版本問題。\n\n"
+            f"完整輸出見 {raw_json_path}。"
+        )
+
 
 def print_summary(detectors):
     if not detectors:
