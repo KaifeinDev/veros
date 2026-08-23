@@ -1281,6 +1281,15 @@ def main() -> None:
     overview_md = read_md(args.overview)
     scope_note_md = read_md(args.scope_note)
 
+    # Falls back to the scanned project's own directory name. scan_env.json
+    # records the path Step 1 actually ran against, which is a truer answer than
+    # the cwd of whoever is building the report — and leaving it "（未指定）"
+    # was the common case, since --client is easy to forget on a rerun.
+    client_name = args.client or ""
+    if not client_name:
+        project_path = (env or {}).get("project_path") or os.getcwd()
+        client_name = os.path.basename(os.path.abspath(project_path))
+
     scan_list = extract_findings(before)
 
     errors = []
@@ -1345,7 +1354,7 @@ def main() -> None:
 
 ## 摘要
 
-**受檢對象**：{args.client or '（未指定）'}
+**受檢對象**：{client_name}
 **檢測期間**：{engagement}
 **受檢版本**：{(env or {}).get('git_commit') or 'N/A'}
 
@@ -1364,10 +1373,10 @@ def main() -> None:
 
 {render_standards_appendix()}"""
 
-    title = f"{args.client} " if args.client else ""
+    title = f"{client_name} " if client_name else ""
     report = (
         f"# {title}智能合約安全檢測報告\n\n"
-        f"**檢測工具**: Slither\n"
+        f"**檢測工具**: Veros\n"
         f"**檢測日期**: {engagement}\n\n"
         "---\n\n"
         f"{render_internal_banner(grade_info)}"

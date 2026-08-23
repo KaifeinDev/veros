@@ -422,16 +422,10 @@ class ReportPDF(FPDF):
         self.set_xy(margin_l, row_y)
         self.set_font("Body", "B", 11)
         self.set_text_color(*COLOR_HEADING)
-        self.cell(content_w * 0.6, 6, self.report_title, align="L")
-        meta = [p for p in (
-            f"檢測工具：{self.report_tool}" if self.report_tool else "",
-            f"檢測日期：{self.report_date}" if self.report_date else "",
-        ) if p]
-        if meta:
-            self.set_xy(margin_l, row_y)
-            self.set_font("Body", "", 8.5)
-            self.set_text_color(*HEADER_META_GRAY)
-            self.cell(content_w, 6, "   |   ".join(meta), align="R")
+        # Title only. The tool and the date are stated on the cover and again
+        # in the title block; repeating them on all eighteen pages was three
+        # copies of a fact that does not change mid-document.
+        self.cell(content_w, 6, self.report_title, align="L")
 
         rule_y = row_y + 7.5
         self.set_draw_color(*GRAY_300)
