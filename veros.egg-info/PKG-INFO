@@ -39,7 +39,7 @@ veros/                      ← 這個 repo
 ├── veros/                  ← 套件本體，pip install 後這些跟著走
 │   ├── cli.py              ← 統一入口，把子指令分派出去
 │   ├── run.py              ← veros run：整條流程串起來（--brief / --apply 兩種 Step 2）
-│   ├── init_audit.py       ← veros init：產 audit/ 的手寫文件範本
+│   ├── init_audit.py       ← audit/ 手寫文件的範本，缺檔時由 run 自動建立
 │   ├── config.py           ← veros config：AI 判讀用的模型與 API key
 │   ├── docs.py             ← veros docs：印出隨套件安裝的方法論
 │   ├── env_check.py        ← Step 0：環境健檢（veros doctor）
@@ -92,7 +92,7 @@ veros/                      ← 這個 repo
 
 這個 kit 是獨立的工具 repo（`scripts/` 就在根目錄），有兩種用法：
 
-1. **獨立使用（不需要 Claude Code）**：clone 到任何位置，直接跑 `<kit>/veros/cli.py`。下方範例中的 `<kit>` 代表你放這個 repo 的路徑。
+1. **獨立使用（不需要 Claude Code）**：`pip install` 之後直接用 `veros` 指令，不必知道 repo 放在哪；要跑未安裝的工作區版本則是 `python3 <kit>/veros/cli.py`。
 2. **作為 Claude Code skill**：把 kit 帶進目標專案的 `.claude/skills/security-scan/`，Claude Code 就能以 `/security-scan` 觸發 `SKILL.md` 的完整流程——skill 的發現機制要求檔案放在這個固定位置，`SKILL.md` 內的指令路徑也以此為準。兩種用法跑的是同一套 scripts。
 
    實際要帶的檔案是 `SKILL.md` + `scripts/` + `references/`（`SKILL.md` 與各 scripts 都會讀 `references/` 底下三份文件，缺一份 Step 2/3/4 會找不到依據或直接報錯）；`test-fixtures/` 是 kit 自己的迴歸測試樣本，掃描流程不會讀它，**不需要**帶進新專案。`README.md` 對執行流程不是必要的，帶不帶都行。
@@ -127,8 +127,8 @@ Veros 在一個受檢專案裡寫的東西全部在 `audit/` 底下，各步驟�
 ```
 audit/
 ├── scan/            ← Step 1 產物（results_before.json / scope.json / scan_env.json / skeleton）
-├── overview.md      ← 你寫：協定理解，進報告的「摘要」章（veros init 產範本）
-├── scope_note.md    ← 你寫：本次偏離標準程序之處，沒有就刪掉（veros init 產範本）
+├── overview.md      ← 你寫：協定理解，進報告的「摘要」章（缺檔時自動產生範本）
+├── scope_note.md    ← 你寫：本次偏離標準程序之處，沒有就留著空範本（自動產生）
 ├── worksheet.md     ← 內部工作底稿，含內部語氣與全量明細
 └── report/          ← 交付物：report.md + report.pdf
 ```
@@ -180,9 +180,6 @@ veros run --apply --client "<甲方名稱>"  # 套用 → review → report
 # 安裝（一次）
 python3 -m pip install --user git+https://github.com/KaifeinDev/veros.git
 
-# Step -1：產出 audit/overview.md 與 audit/scope_note.md 範本（只需一次）
-veros init
-
 # Step 0：環境健檢，exit code 0 才代表可以往下走
 veros doctor --src-prefix src/
 
@@ -213,7 +210,7 @@ veros review --classification ./audit/scan/classification.json
 
 # Step 3：產出交付報告 + 工作底稿
 # --scan-dir 一次帶出 Step 1 的四個檔案（results_before/classification/scan_env/scope），
-# 個別 --before/--classification/--env/--scope 仍可覆蓋。--out-dir 預設 ./security-scan-report
+# 個別 --before/--classification/--env/--scope 仍可覆蓋。--out-dir 預設 ./audit/report
 veros report --client "<甲方名稱>" \
   --engagement-from 2026-08-01 --engagement-to 2026-08-14
 # --scan-dir/--overview/--scope-note/--out-dir 都有 audit/ 底下的預設值，通常不用給
@@ -248,7 +245,7 @@ veros report --client "<甲方名稱>" \
 
 **`veros report`**（`report.py`）
 - 先驗證 `classification.json`：逐筆與 `--before` 的掃描結果核對（比對鍵：check + file + 起始行號），對不上的過期項目、無效的 `category`/`impact`/`severity` 值、`impact` 與掃描結果不符、B/C 類缺 `dev_note`、A 類缺 `remediation`、D 類缺確認三格、降級缺 `severity_rationale`、`id` 格式錯或重複，一律列出錯誤並以 exit code `2` 結束、**不產出報告**；掃描有但分類檔漏掉的發現則視同「未分類」（判級時當 D 算，未分類的 High 直接第四級）
-- 呼叫 `build_report.py` 產生 `report.md`（封面資訊、目錄、摘要與嚴重度計數表、掃描範圍、協定理解摘要、檢測方法、情境庫覆蓋、待處理項目、發現明細、已評估項目摘要、處置分類附錄）與 `audit/worksheet.md`（工作底稿）
+- 呼叫 `build_report.py` 產生 `report.md`（封面、目錄，以及三個章節：檢測範圍與方法／摘要（含協定理解）／檢測結果（發現依處置分類分組），末尾附處置分類說明）與 `audit/worksheet.md`（工作底稿）
 - 呼叫 `md_to_pdf.py` 轉成 `report.pdf`（`--skip-pdf` 可跳過這步，只留 markdown）
 - **exit code 即交付閘門**（見 `references/severity_grading.md`）：`0` = 可交付；`3`/`4` = 不可交付（報告照常產出但帶「內部工作版本」標記，僅供內部追蹤）；`2` = 驗證失敗。**等級本身不出現在報告本文**，只驅動 exit code 與浮水印
 - 自動探測系統上哪個 python 裝有 `fpdf2`（即使目前在 Slither 的 venv 底下執行也一樣能找到系統 python），找不到就用 `SECURITY_SCAN_REPORT_PYTHON` 環境變數指定
@@ -280,7 +277,7 @@ pip install slither-analyzer
 solc-select install <version> && solc-select use <version>
 
 # 報告產生需要的套件，裝在系統 python（不是上面的 venv）
-python3 -m pip install --user --break-system-packages "fpdf2>=2.8.8" matplotlib
+python3 -m pip install --user --break-system-packages "fpdf2>=2.8.4,!=2.8.7" matplotlib
 
 # 中文字型：報告是繁中，PDF 需要涵蓋 CJK 的字型。macOS 不內建 Noto Sans CJK，
 # 裝到 ~/Library/Fonts/ 即可自動偵測；Linux 用 apt install fonts-noto-cjk。
