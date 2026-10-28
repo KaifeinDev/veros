@@ -1,12 +1,12 @@
 ---
 name: security-scan
-description: Use this skill when the user asks to run a smart contract security scan, Slither audit, vulnerability scan, or wants a security report for a Solidity/Foundry project — e.g. "跑一次安全掃描", "用 slither 掃這個專案", "產出安全檢測報告", "run a slither scan", "security audit this contract". Drives the full Slither scan → AI triage (A/B/C/D) → inline suppression comments → PDF report pipeline for Foundry + OpenZeppelin upgradeable-contract projects.
+description: Use this skill when the user asks to run a smart contract security scan, Slither audit, vulnerability scan, or wants a security report for a Solidity/Foundry project — e.g. "跑一次安全掃描", "用 slither 掃這個專案", "產出安全檢測報告", "run a slither scan", "security audit this contract". Drives the full Slither scan → AI triage (A/B/C/D) → human sign-off → PDF report pipeline for Foundry or Hardhat Solidity projects.
 argument-hint: "[--full-audit]"
 ---
 
 # Slither + AI 協作安全掃描流程
 
-這個 skill 把「Slither 掃描 → AI 分類 → 加抑制註解 → 產出完整 PDF 報告」固定成一個可重複執行的流程，用在 Foundry 專案（特別是使用 OpenZeppelin upgradeable 合約的專案）。
+這個 skill 把「Slither 掃描 → AI 分類 → 人工簽核 → 產出完整 PDF 報告」固定成一個可重複執行的流程，用在 Solidity 專案（Foundry 或 Hardhat 皆可，特別是使用 OpenZeppelin upgradeable 合約的專案）。
 
 Step 0/1/3（環境健檢、掃描、產報告）背後都是呼叫 `veros`（`doctor` / `scan` / `report`）—— 這幾個步驟是純確定性的，可以獨立於 Claude 執行、也可以接進 CI。Step 2（分類）需要工程判斷與 LLM 輔助，其中**機械性可檢查的部分**由 `veros review` 負責。加抑制註解已不再是編號步驟，改為選配的收尾動作（見本文件最後一節）。完整的架構說明、CLI 用法、輸出格式見 `README.md`。
 

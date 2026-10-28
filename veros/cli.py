@@ -10,6 +10,7 @@ SUBCOMMANDS = {
     "run": "run.py",
     "config": "config.py",
     "docs": "docs.py",
+    "skill": "skill_install.py",
     "doctor": "env_check.py",
     "scan": "scan.py",
     "triage": "triage.py",
@@ -51,6 +52,7 @@ HELP = """Veros — 智能合約交付前的安全自檢工具
   report    產出 report.md 與 report.pdf
   config    AI 判讀用的模型與 API key
   docs      印出隨工具安裝的方法論（情境庫、嚴重度標準、踩坑紀錄）
+  skill     把 /security-scan 裝進 Claude Code（--install，見下方「安裝 skill」）
 
 檔案配置（全部在專案的 audit/ 底下，缺的會自動建立）
   audit/scan/           掃描產物與 classification.json
@@ -66,6 +68,14 @@ HELP = """Veros — 智能合約交付前的安全自檢工具
       0 可交付　3／4 內部工作版本（仍會產出，帶浮水印）　2 分類驗證失敗（不產出）
   * AI 起草的分類一律標記為未經人工確認，閘門不會判定為可交付。
     「可交付」始終是人的簽核 —— 模型省掉的是打字，不是責任。
+
+安裝 skill（Claude Code 的 /security-scan）
+  pip 只裝 CLI；slash 指令要把 SKILL.md 與 references/ 放到 Claude Code 找得到的位置：
+      veros skill              看現在裝在哪、跟套件內容一不一致
+      veros skill --install    裝進 ~/.claude/skills/（個人，每個專案都能用）
+      veros skill --install --project
+                               裝進當前專案的 .claude/skills/
+  裝完重啟 Claude Code。skill 跑的是 PATH 上的 veros，所以兩者都要在。
 
 前置需求
   Slither 與 Foundry 是外部工具，不隨 pip 安裝：

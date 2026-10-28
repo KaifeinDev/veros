@@ -46,6 +46,7 @@ veros/                      ← 這個 repo
 │   ├── init_audit.py       ← audit/ 手寫文件的範本，缺檔時由 run 自動建立
 │   ├── config.py           ← veros config：AI 判讀用的模型與 API key
 │   ├── docs.py             ← veros docs：印出隨套件安裝的方法論
+│   ├── skill_install.py    ← veros skill：把 SKILL.md + references/ 裝到 .claude/skills/
 │   ├── env_check.py        ← Step 0：環境健檢（veros doctor）
 │   ├── scan.py             ← Step 1：跑 slither + 過濾 + scope.json + 分類 skeleton
 │   ├── filter_results.py   ← 依 src 路徑過濾 slither JSON
@@ -94,42 +95,59 @@ veros/                      ← 這個 repo
 
 ## 安裝與部署
 
-這個 kit 是獨立的工具 repo（Python 套件在 `veros/`，倉庫根目錄的 `SKILL.md` 與 `references/` 是指向它的 symlink），有兩種用法：
+**兩件事要裝，順序固定：**
 
-1. **獨立使用（不需要 Claude Code）**：`pip install` 之後直接用 `veros` 指令，不必知道 repo 放在哪；要跑未安裝的工作區版本則是 `python3 <kit>/veros/cli.py`。
-2. **作為 Claude Code skill**：Claude Code 的 skill 發現機制要求 `SKILL.md` 位在 `.claude/skills/<skill 名>/` 的根目錄，所以要讓 `/security-scan` 跑得起來，得把方法論檔案放到這個固定位置。**這條路也需要先 `pip install`**——`SKILL.md` 自己不含邏輯，它每一步都在呼叫 `veros` CLI。
+```bash
+# 1. CLI —— 不管有沒有 Claude Code 都需要
+python3 -m pip install --user git+https://github.com/KaifeinDev/veros.git
 
-   實際要帶的檔案是 `SKILL.md` + `references/`（`SKILL.md` 會讀 `references/` 底下的文件，缺一份 Step 2/3 會找不到依據或直接報錯）；`test-fixtures/` 是 kit 自己的迴歸測試樣本，掃描流程不會讀它，**不需要**帶進新專案。`README.md` 對執行流程不是必要的，帶不帶都行。
+# 2. skill —— 要用 Claude Code 的 /security-scan 才需要
+veros skill --install              # 個人：~/.claude/skills/security-scan
+veros skill --install --project    # 或只裝進當前專案的 .claude/skills/
+```
 
-   **已經 pip install 的話最省事**：`SKILL.md` 與 `references/` 是跟著 wheel 一起裝的（`veros docs --path` 會印出位置），symlink 過去就好，之後升級 kit 時 skill 內容也一起更新：
-   ```bash
-   cd <新專案根目錄>
-   mkdir -p .claude/skills
-   ln -s "$(veros docs --path)" .claude/skills/security-scan
-   ```
+裝完**重啟 Claude Code**（或開新 session），`/security-scan` 才會出現。
 
-   或以 git submodule 帶入（推薦，之後 `git submodule update --remote` 可以拉 kit 更新）：
-   ```bash
-   cd <新專案根目錄>
-   mkdir -p .claude/skills
-   git submodule add https://github.com/KaifeinDev/veros.git .claude/skills/security-scan
-   ```
+**為什麼是兩步**：pip 把套件裝進 site-packages，那不是 Claude Code 會搜尋的路徑 —— 它只認
+`<根目錄>/.claude/skills/<skill 名>/SKILL.md`。反過來 `SKILL.md` 自己不含任何邏輯，每一步都在呼叫
+`veros` CLI。兩者互補不是二選一：少了第 1 步，skill 跑起來每個指令都 command not found；少了第 2 步，
+`/security-scan` 不存在，但你仍然可以手動跑 `veros run`。
 
-   `git submodule add` 一定會把整個 repo（含 `test-fixtures/`）拉下來，沒有「只抓部分路徑」的選項。如果想讓工作目錄乾淨、不帶 `test-fixtures/`，接著設 sparse-checkout（cone mode 下根目錄檔案預設保留，只有你指定的子目錄會被 checkout）：
-   ```bash
-   cd .claude/skills/security-scan
-   git sparse-checkout init --cone
-   git sparse-checkout set veros
-   cd -
-   ```
-   這個設定存在 submodule 自己的 `.git/info/sparse-checkout`，**不會**隨 `.gitmodules` 同步給其他人——同事 clone 這個專案並跑 `git submodule update --init` 後預設仍會拉出完整內容，得自己重跑上面兩行 `git sparse-checkout` 指令，或把它們包進專案的 setup script（例如 `Makefile` / `scripts/setup.sh`）裡跟 `submodule update --init` 一起執行。
+`veros skill` 不帶參數會印出現在裝在哪、以及那份複本跟套件內容是否一致 —— `pip install --upgrade`
+之後拿來確認要不要重跑 `--install`。它搬的就是 `SKILL.md` + `references/` 這兩樣（`SKILL.md` 會讀
+`references/` 底下的文件，缺一份 Step 2/3 會找不到依據或直接報錯）；`test-fixtures/` 是 kit 自己的
+迴歸測試樣本，掃描流程不會讀它，**不需要**帶進新專案。
 
-   或直接複製（不需要保留 kit 自己的 git 歷史時）：
-   ```bash
-   cd <新專案根目錄>
-   mkdir -p .claude/skills/security-scan
-   cp -rL <kit 路徑>/{SKILL.md,references} .claude/skills/security-scan/
-   ```
+### 要讓 skill 隨專案進版控：git submodule
+
+`veros skill --install --project` 複製出來的是未追蹤的檔案。如果希望同事 clone 專案就有、並且能用
+`git submodule update --remote` 拉 kit 的更新，改用 submodule 帶入：
+
+```bash
+cd <新專案根目錄>
+mkdir -p .claude/skills
+git submodule add https://github.com/KaifeinDev/veros.git .claude/skills/security-scan
+```
+
+`git submodule add` 一定會把整個 repo（含 `test-fixtures/`）拉下來，沒有「只抓部分路徑」的選項。如果想讓工作目錄乾淨、不帶 `test-fixtures/`，接著設 sparse-checkout（cone mode 下根目錄檔案預設保留，只有你指定的子目錄會被 checkout）：
+
+```bash
+cd .claude/skills/security-scan
+git sparse-checkout init --cone
+git sparse-checkout set veros
+cd -
+```
+
+這個設定存在 submodule 自己的 `.git/info/sparse-checkout`，**不會**隨 `.gitmodules` 同步給其他人——同事 clone 這個專案並跑 `git submodule update --init` 後預設仍會拉出完整內容，得自己重跑上面兩行 `git sparse-checkout` 指令，或把它們包進專案的 setup script（例如 `Makefile` / `scripts/setup.sh`）裡跟 `submodule update --init` 一起執行。
+
+submodule 部署由 git 自己管理，所以 **`veros skill --install` 偵測到之後會拒絕覆寫**（真要改成複製
+部署才加 `--force`）—— 兩種部署方式不會互相破壞。
+
+### 不用 Claude Code
+
+`pip install` 之後直接用 `veros` 指令就好，跳過第 2 步，不必知道 repo 放在哪。要跑未安裝的工作區版本
+則是 `python3 <kit>/veros/cli.py`（這個 repo 的 Python 套件在 `veros/`，倉庫根目錄的 `SKILL.md` 與
+`references/` 是指向它的 symlink，為的是讓 submodule 部署也符合 skill 的佈局要求）。
 
 ## 專案裡的檔案配置
 
@@ -173,6 +191,8 @@ audit/
 就寫明。分類是整份報告唯一的可信度來源，必須有人逐筆看過才算完成 —— 做法見下方「人工確認」。
 
 #### A. 有 Claude Code：跑 `/security-scan`
+
+前提是 skill 已經裝好（見上方「安裝與部署」）；`veros skill` 不帶參數可以確認現在裝在哪。
 
 在專案根目錄的 Claude Code 對話裡輸入：
 
@@ -291,6 +311,13 @@ Step 3 會逐筆核對，不一致直接拒絕產報告。
 暫時改過原始碼，使部分檔案雜湊與交付版本不符）。
 
 ### CLI 子指令細節
+
+**`veros skill`**（`skill_install.py`）
+- 不帶參數：印出套件安裝位置、skill 名稱、預計安裝到哪，以及已安裝的那份跟套件內容是否一致
+- `--install`：把 `SKILL.md` 與 `references/` 複製到 `~/.claude/skills/<skill 名>/`；`--project` 則改成當前目錄的 `.claude/skills/`
+- 目錄名取自 `SKILL.md` frontmatter 的 `name:`，不是寫死的 —— 兩者不一致時 Claude Code 找不到 skill，且**不會報錯**
+- `references/` 是整個替換而不是合併：套件移除過的參考檔不該繼續從舊複本被讀到
+- 偵測到目標是 symlink 或含 `.git`（submodule 部署）時拒絕覆寫並 exit 1，要強制改成複製部署才加 `--force`
 
 **`veros doctor`**（`env_check.py`）
 - 檢查 `foundry.toml` 存在且 `src` 不是危險的 `"."`
