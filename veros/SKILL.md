@@ -47,9 +47,7 @@ veros doctor --src-prefix src/
 ## Step 1：Slither 掃描（自動）
 
 ```bash
-veros scan \
-  --out-dir /tmp/security-scan \
-  --src-prefix src/
+veros scan --src-prefix src/
 ```
 
 （帶 `--full-audit` 則連 `lib/` 底下相依套件的發現也一併保留，不過濾。）
@@ -61,11 +59,12 @@ veros scan \
 
 **重掃時（同一專案之前已做過 Step 2）加上 `--prev-classification <上次的 classification.json>`**：skeleton 會把「跟上次同一筆」的發現（check + file + 起始行號一致；行號位移時退而用 check + file 唯一比對）自動沿用上次的 category/dev_note 並標記 `carried_from_previous`，只有新出現的發現留空待分類；上次的 manual_findings 也會原樣帶入。CLI 會列出「上次有、這次沒有」的已解決清單。
 
-這個指令會自動：跑 `slither . --json`、過濾出專案自己的發現（`is_own_finding`，依 `source_mapping.filename_relative` 是否落在 `--src-prefix` 底下判斷）、蒐集掃描環境資訊寫成 `scan_env.json`，並在終端機印出摘要表（check / impact / 檔案:行號 / 描述）。寫入 `--out-dir`：
+這個指令會自動：跑 `slither . --json`、過濾出專案自己的發現（`is_own_finding`，依 `source_mapping.filename_relative` 是否落在 `--src-prefix` 底下判斷）、蒐集掃描環境資訊寫成 `scan_env.json`，並在終端機印出摘要表（check / impact / 檔案:行號 / 描述）。產物寫進 `audit/scan/`（`--out-dir` 可改）：
 
 - `results_raw.json` — 未過濾的原始 `slither --json` 輸出
 - `results_before.json` — 過濾後結果（或 `--full-audit` 時等於 raw）
-- `scan_env.json` — 掃描環境資訊（`scan_date`/`project_path`/`git_commit`/`solc_version`/`slither_version`/`forge_version`/`dependencies`），供 Step 4 使用
+- `scan_env.json` — 掃描環境資訊（`scan_date`/`project_path`/`git_commit`/`solc_version`/`slither_version`/`forge_version`/`dependencies`），供 Step 3 使用
+- `scope.json` — 納入掃描的每個 `.sol` 檔、行數與 SHA-256，以及 `--exclude-path` 的排除清單，供報告的「掃描範圍」章節使用
 - `classification_skeleton.json` — Step 2 的起點：每筆發現已預填 `id`/`check`/`impact`/`file`/`lines`/`description`，只留 `category` 與 `dev_note` 空白
 
 把 CLI 印出的摘要表內容列給使用者看。
@@ -98,7 +97,7 @@ veros scan \
 
 **另外兩個頂層鍵**：`scenario_coverage`（情境庫逐合約覆蓋紀錄，進報告的「情境庫覆蓋」章節——`hits` 內的編號必須對得上實際存在的 finding）與 `scope_exclusion_reasons`（`--exclude-path` 每個前綴的排除理由，進報告的「掃描範圍」章節）。
 
-**從 skeleton 開始，不要手打**：把 Step 1 產出的 `classification_skeleton.json` 複製成 `/tmp/security-scan/classification.json`，只填每筆的 `category` 與 `dev_note`，**不要改動預填的 `check`/`impact`/`file`/`lines`**（Step 4 會逐筆核對這些欄位跟掃描結果是否一致，不一致直接拒絕產報告；`impact` 打錯以前會讓資安等級虛高，現在會被擋下）：
+**從 skeleton 開始，不要手打**：把 Step 1 產出的 `classification_skeleton.json` 複製成 `audit/scan/classification.json`，只填每筆的 `category` 與 `dev_note`，**不要改動預填的 `check`/`impact`/`file`/`lines`**（Step 3 會逐筆核對這些欄位跟掃描結果是否一致，不一致直接拒絕產報告；`impact` 打錯以前會讓資安等級虛高，現在會被擋下）：
 
 ```json
 {
@@ -148,7 +147,7 @@ veros scan \
 
 **選填的 `status` 欄位（修復進度追蹤，跟 `category` 是兩件事）**：`findings[]`／`manual_findings[]` 的每一筆都可以額外加一個 `status` 欄位，記錄目前的修復／處置進度（例如 `"待處理"`、`"已修復"`、`"已確認接受風險"`），跟 `category`（這是不是問題、算哪一類）是正交的兩個維度——`category` 定案後通常不會再變，`status` 會隨著專案團隊的修復進度持續更新。此欄位為選填、不驗證固定字典，缺省時報告顯示「待處理」。只有 `category=A` 的掃描發現與**全部** `manual_findings`（依規則永遠不是 C 類，見上方 category 限制）才會進入報告新增的「待決策／待處理項目總表」（B/C 類是永久性判定，沒有「修復進度」這個概念，不適用 `status`）。等專案開始修復後，重跑報告時把對應項目的 `status` 更新掉，總表跟逐筆明細會一起反映最新進度，不需要另外開新文件追蹤。
 
-掃描結果裡的**每一筆**發現都要分類：Step 4 會把 classification.json 跟掃描結果逐筆核對，漏掉的一律視同 D（待確認），未分類的 High 直接把等級打成第四級。
+掃描結果裡的**每一筆**發現都要分類：Step 3 會把 classification.json 跟掃描結果逐筆核對，漏掉的一律視同 D（待確認），未分類的 High 直接把等級打成第四級。
 
 **風格預分類（`auto_classified: "style"`）的複核義務**：skeleton 裡標了這個欄位的項目已由 scan 預填為 C，可視為已分類，但列給使用者時要**明講有幾筆被自動判為 C、是哪些檢查器**，不能默默略過——使用者有權知道哪些發現不是人判的。若使用者認為某筆有安全含義，清空 `category` 與 `auto_classified` 後重新判定。
 
@@ -158,12 +157,12 @@ veros scan \
 
 ```bash
 veros review \
-  --classification /tmp/security-scan/classification.json
+  --classification audit/scan/classification.json
 ```
 
 它會列出：共用同一段 dev_note 的群組、dev_note 過短、必填欄位缺漏、降級未附理由，以及兩個單獨成節的重點——**「工具判 High、我方判誤報（C）」**與**「工具判 High、我方降級」**。這兩節是整份分類裡權重最高、甲方最可能逐條挑戰的判斷，必須逐筆確認 dev_note 是針對該筆自己的程式碼寫的，不是共用的模板理由。exit code 1 代表有待抽查項目（提醒，不是錯誤）。
 
-**還要另外產出協定理解摘要**：把 `audit/AUDIT_NOTES.md` 的資產與托管地圖、特權角色權限表改寫成對外語氣的 markdown，存成 `audit/overview.md`，用 `--overview` 傳給 report。這會成為報告的「協定理解摘要」章節——甲方最想知道的一件事是「誰能動我的錢」，而這是全部產出裡唯一真正需要額外人力的一項。缺這份時報告該章節會印出明顯的「未提供」警語。
+**還要另外產出協定理解摘要**：把讀碼過程建立的資產與托管地圖、特權角色權限表改寫成對外語氣的 markdown，寫進 `audit/overview.md`（Step 1 缺檔時會產生範本，`veros report` 預設就讀這個路徑，不必另外傳 `--overview`；檔案若仍是未填寫的範本則視同未提供）。這會成為報告的「協定理解摘要」章節——甲方最想知道的一件事是「誰能動我的錢」，而這是全部產出裡唯一真正需要額外人力的一項。缺這份時報告該章節會印出明顯的「未提供」警語。
 
 把 A/B/C/D 四類清單與 manual_findings 列給使用者看（含每筆的具體理由），**明確等待使用者確認**（例如回覆「確認」或「ok」）才能進入 Step 3。使用者若要求把某筆從一類移到另一類，更新 `classification.json` 後重新給使用者看一次。
 
@@ -171,19 +170,15 @@ veros review \
 
 ```bash
 veros report \
-  --before /tmp/security-scan/results_before.json \
-  --classification /tmp/security-scan/classification.json \
-  --env /tmp/security-scan/scan_env.json \
-  --scope /tmp/security-scan/scope.json \
-  --overview <專案根目錄>/audit/overview.md \
   --client "<甲方名稱>" \
-  --engagement-from <YYYY-MM-DD> --engagement-to <YYYY-MM-DD> \
-  --out-dir <專案根目錄>/security-scan-report
+  --engagement-from <YYYY-MM-DD> --engagement-to <YYYY-MM-DD>
 ```
+
+四個輸入（`results_before.json` / `classification.json` / `scan_env.json` / `scope.json`）預設都從 `audit/scan/` 取，`--overview` 與 `--scope-note` 預設從 `audit/` 取；Step 1 換過 `--out-dir` 的話用 `--scan-dir` 指過去，個別檔案也都可以用 `--before` / `--classification` / `--env` / `--scope` 覆蓋。
 
 **會產出兩份文件**：
 
-- `<out-dir>/report.md` + `report.pdf` —— **交付報告**，給甲方。
+- `audit/report/report.md` + `report.pdf` —— **交付報告**，給甲方（`--out-dir` 可改）。
 - `<專案根>/audit/worksheet.md` —— **工作底稿**，內部用（全量逐筆分類、複核提醒、完整覆蓋矩陣）。刻意寫在交付目錄之外、不轉 PDF。**這個路徑必須被 gitignore**，否則會隨程式碼交付給甲方；沒被忽略時 CLI 會警告。用 `--worksheet` 可改路徑。
 
 這個指令依序呼叫 `build_report.py`（產生 `report.md`）與 `md_to_pdf.py`（轉成 `report.pdf`，需要 `fpdf2`）。`fpdf2` 要裝在系統 python（不是 slither 用的 venv，venv 的 pip 曾經壞掉過，見 `pitfalls.md`）：
@@ -233,7 +228,7 @@ python3 -m pip install --user --break-system-packages "fpdf2>=2.8.8"
    ```bash
    forge build
    veros scan \
-     --out-dir /tmp/security-scan/after --src-prefix src/
+     --out-dir audit/scan-after --src-prefix src/
    ```
    比對加註解前後的發現數量，並明確確認 `category` 為 A（已確認需修復）與 D（待確認）的項目仍然原封不動出現在新的掃描結果裡 —— 代表沒有被誤蓋掉。**報告不呈現這個前後對照**（報告只呈現當次掃描結果），這是純內部的驗證動作。
    注意區塊式抑制是**永久生效**的：未來在 `slither-disable-start`/`end` 之間新增的程式碼也會被靜默忽略，所以區塊範圍要盡量貼近實際需要抑制的那幾行。
