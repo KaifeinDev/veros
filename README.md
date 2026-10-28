@@ -1,6 +1,21 @@
 # Veros
 
-在交付前，使用此工具做靜態分析並生成簡易自檢報告，確保交付的品質穩定性。
+**Veros 是智能合約漏洞掃描工具。** 對 Solidity 專案（Foundry 或 Hardhat）跑 Slither 靜態分析，再補一輪
+Slither 抓不到的業務邏輯漏洞掃描，把每一筆發現逐筆分類並寫下判斷依據，最後產出可交給甲方的審計報告，
+以及一個可接進 CI 的交付閘門。
+
+**掃得到什麼**
+
+- Slither 的全部檢查器：重入、access control、未初始化變數、`delegatecall`、upgradeable 合約的 storage 配置等
+- `references/logic_scan.md` 的十條情境：權限檢查的實作邏輯、未保護的狀態變更、旗標未落實、滑點、價格源等
+  —— 這些是靜態分析工具抓不到、必須讀懂業務意圖才看得出來的漏洞
+- `references/domain_incidents/` 的領域公開事故比對（目前涵蓋 account abstraction、RWA）
+
+**不掃什麼**
+
+非 Solidity 的程式碼。後端、前端、腳本、CI 設定都不在範圍內 —— Veros 的情境庫、嚴重度模型與報告格式
+全是為合約審計設計的，套到其他語言不會得到有意義的結果。那些請用別的工具（例如 Claude Code 內建的
+`/security-review`）。
 
 此工具拆成兩層設計：
 
@@ -79,14 +94,21 @@ veros/                      ← 這個 repo
 
 ## 安裝與部署
 
-這個 kit 是獨立的工具 repo（`scripts/` 就在根目錄），有兩種用法：
+這個 kit 是獨立的工具 repo（Python 套件在 `veros/`，倉庫根目錄的 `SKILL.md` 與 `references/` 是指向它的 symlink），有兩種用法：
 
 1. **獨立使用（不需要 Claude Code）**：`pip install` 之後直接用 `veros` 指令，不必知道 repo 放在哪；要跑未安裝的工作區版本則是 `python3 <kit>/veros/cli.py`。
-2. **作為 Claude Code skill**：把 kit 帶進目標專案的 `.claude/skills/security-scan/`，Claude Code 就能以 `/security-scan` 觸發 `SKILL.md` 的完整流程——skill 的發現機制要求檔案放在這個固定位置，`SKILL.md` 內的指令路徑也以此為準。兩種用法跑的是同一套 scripts。
+2. **作為 Claude Code skill**：Claude Code 的 skill 發現機制要求 `SKILL.md` 位在 `.claude/skills/<skill 名>/` 的根目錄，所以要讓 `/security-scan` 跑得起來，得把方法論檔案放到這個固定位置。**這條路也需要先 `pip install`**——`SKILL.md` 自己不含邏輯，它每一步都在呼叫 `veros` CLI。
 
-   實際要帶的檔案是 `SKILL.md` + `scripts/` + `references/`（`SKILL.md` 與各 scripts 都會讀 `references/` 底下三份文件，缺一份 Step 2/3/4 會找不到依據或直接報錯）；`test-fixtures/` 是 kit 自己的迴歸測試樣本，掃描流程不會讀它，**不需要**帶進新專案。`README.md` 對執行流程不是必要的，帶不帶都行。
+   實際要帶的檔案是 `SKILL.md` + `references/`（`SKILL.md` 會讀 `references/` 底下的文件，缺一份 Step 2/3 會找不到依據或直接報錯）；`test-fixtures/` 是 kit 自己的迴歸測試樣本，掃描流程不會讀它，**不需要**帶進新專案。`README.md` 對執行流程不是必要的，帶不帶都行。
 
-   以 git submodule 帶入（推薦，之後 `git submodule update --remote` 可以拉 kit 更新）：
+   **已經 pip install 的話最省事**：`SKILL.md` 與 `references/` 是跟著 wheel 一起裝的（`veros docs --path` 會印出位置），symlink 過去就好，之後升級 kit 時 skill 內容也一起更新：
+   ```bash
+   cd <新專案根目錄>
+   mkdir -p .claude/skills
+   ln -s "$(veros docs --path)" .claude/skills/security-scan
+   ```
+
+   或以 git submodule 帶入（推薦，之後 `git submodule update --remote` 可以拉 kit 更新）：
    ```bash
    cd <新專案根目錄>
    mkdir -p .claude/skills
@@ -97,7 +119,7 @@ veros/                      ← 這個 repo
    ```bash
    cd .claude/skills/security-scan
    git sparse-checkout init --cone
-   git sparse-checkout set scripts references
+   git sparse-checkout set veros
    cd -
    ```
    這個設定存在 submodule 自己的 `.git/info/sparse-checkout`，**不會**隨 `.gitmodules` 同步給其他人——同事 clone 這個專案並跑 `git submodule update --init` 後預設仍會拉出完整內容，得自己重跑上面兩行 `git sparse-checkout` 指令，或把它們包進專案的 setup script（例如 `Makefile` / `scripts/setup.sh`）裡跟 `submodule update --init` 一起執行。
@@ -106,7 +128,7 @@ veros/                      ← 這個 repo
    ```bash
    cd <新專案根目錄>
    mkdir -p .claude/skills/security-scan
-   cp -r <kit 路徑>/{SKILL.md,scripts,references} .claude/skills/security-scan/
+   cp -rL <kit 路徑>/{SKILL.md,references} .claude/skills/security-scan/
    ```
 
 ## 專案裡的檔案配置
@@ -127,88 +149,146 @@ audit/
 
 ## 使用方式
 
-### 有 Claude Code：跑 `/security-scan`
+### 先確認這三件事
 
-在專案根目錄的 Claude Code 對話裡輸入 `/security-scan`（要含依賴套件本身的發現則用 `/security-scan --full-audit`）。Claude 會照 `SKILL.md` 的步驟走：自動跑 Step 0/1（呼叫下面的 CLI），把發現列給你看並等你確認分類（Step 2），確認後才加註解（Step 3），最後自動產出報告（Step 4）。
+1. **環境裝好了**：Foundry（`forge`）或 Hardhat（`npx hardhat`）、Slither（`slither`）、系統 python 的
+   `fpdf2`、一套 CJK 字型。全部步驟見下方「環境安裝」，`veros doctor` 會逐項檢查並告訴你缺什麼。
+2. **在要掃的專案根目錄下執行**。Veros 寫出來的所有檔案都在那個專案的 `audit/` 底下（見上方「專案裡的
+   檔案配置」），不會動到專案的其他部分。
+3. **`--src-prefix` 指向合約原始碼的根目錄**：Foundry 專案通常是 `src/`，Hardhat 專案通常是 `contracts/`。
+   這個參數決定哪些發現算「專案自己的」—— 給錯的話 `lib/` 底下相依套件的發現會混進來。
 
-### 不用 Claude Code：直接跑 CLI
+### 選一條路
 
-環境需求：Foundry（`forge`）、Slither（`slither`，可以裝在 venv）、系統 python 需要 `fpdf2`（見下方「環境安裝」）。
+掃描（Step 1）與產報告（Step 3）四條路完全一樣，差別只在 **Step 2 的分類由誰起草**：
 
-**一行跑完（AI 起草）**
+| 怎麼跑 | 分類誰起草 | 需要 | 適合 |
+|---|---|---|---|
+| **A.** `/security-scan` | 對話裡的 Claude | Claude Code | 想邊看邊確認、過程中可以隨時追問 |
+| **B.** `veros run` | Veros 自己打 Anthropic API | API key（另計費） | 要一行跑完、可塞進腳本 |
+| **C.** `veros run --brief` → 你的 agent → `--apply` | 你自己的 agent 讀工單完成 | 不需要 API key | 有 Claude Pro／Max 訂閱（訂閱不含 API key） |
+| **D.** 逐步手動 | 你自己 | — | 要精細控制每一步，或在除錯 |
+
+**不管走哪條，AI 起草的分類都只是草稿**：每一筆都標記為未經人工確認，閘門一律不判為可交付，PDF 第一頁
+就寫明。分類是整份報告唯一的可信度來源，必須有人逐筆看過才算完成 —— 做法見下方「人工確認」。
+
+#### A. 有 Claude Code：跑 `/security-scan`
+
+在專案根目錄的 Claude Code 對話裡輸入：
+
+```
+/security-scan
+```
+
+（要連 `lib/` 底下相依套件本身的發現也納入報告，用 `/security-scan --full-audit`。）
+
+Claude 會照 `SKILL.md` 走完整流程：自動跑 Step 0（環境健檢）與 Step 1（掃描），把發現列給你看並**停下來
+等你確認分類**（Step 2），確認後才產出報告（Step 3）。加抑制註解是選配的收尾動作，不在編號流程內。
+
+#### B. `veros run`：一行跑完（打 API）
 
 ```bash
-veros config --api-key sk-ant-...      # 或 export ANTHROPIC_API_KEY
+veros config --api-key sk-ant-...                      # 或 export ANTHROPIC_API_KEY
 veros run --src-prefix src/ --client "<甲方名稱>"
 ```
 
-`run` 依序跑 doctor → scan → AI 判讀 → review → report。**產出的是草稿**：模型寫的每一筆分類都
-標記為未經人工確認，閘門一律不判為可交付，PDF 第一頁就寫明。分類是這份報告唯一的可信度來源，
-必須有人逐筆看過：
+依序跑 doctor → scan → AI 判讀 → review → report，產出草稿報告。接著做下方的「人工確認」。
+
+#### C. `veros run --brief`：不打 API，交給你自己的 agent
 
 ```bash
-veros confirm --list        # 還有哪些待確認
-veros confirm ISL-02 ...    # 確認你已讀過的
-veros report                # 重新評定
-```
-
-**不想另外付 API credits**（Claude Pro／Max 訂閱不含 API key，用這條）：
-
-```bash
-veros run --brief --src-prefix src/     # 跑到產出工單為止，不打 API
+veros run --brief --src-prefix src/            # 跑到產出工單為止，不打 API
 # 讓你的 agent 讀 audit/scan/brief/README.md 逐份完成，結果寫進 brief/results/
-veros run --apply --client "<甲方名稱>"  # 套用 → review → report
+veros run --apply --client "<甲方名稱>"         # 套用 → review → report
 ```
 
-工單裡已包含原始碼、情境庫與 schema，不需要 API key。驗證留在 Veros 這邊 ——
-分類值、必填欄位、編號對得上掃描結果，不合格的會列出來且不寫入。
+工單裡已經包含原始碼、情境庫與 schema，agent 不需要額外 context，也不需要 API key。驗證仍留在 Veros
+這邊 —— 分類值、必填欄位、編號能不能對上掃描結果都會檢查，不合格的會列出來且**不寫入**。
 
-**逐步執行**
+#### D. 逐步手動執行
 
 ```bash
 # 安裝（一次）
 python3 -m pip install --user git+https://github.com/KaifeinDev/veros.git
 
-# Step 0：環境健檢，exit code 0 才代表可以往下走
+# Step 0：環境健檢。exit code 0 才代表可以往下走
 veros doctor --src-prefix src/
 
-# Step 1：跑掃描，輸出到指定目錄
-veros scan --src-prefix src/     # 預設寫到 ./audit/scan
-# --full-audit 則連 lib/ 依賴套件的發現也一併保留
-# 重掃（同專案之前分類過）加 --prev-classification <上次的 classification.json>：
-# 同一筆發現自動沿用上次的 category/dev_note（標記 carried_from_previous），
-# 只有新出現的留空待分類；上次的 manual_findings 原樣帶入待重新確認
+# Step 1：跑 Slither 掃描，預設寫到 ./audit/scan
+veros scan --src-prefix src/
+#   --full-audit               連 lib/ 底下相依套件的發現也保留
+#   --exclude-path <前綴>      排除 src/ 內部的 mock／測試樁目錄（可重複）
+#   --prev-classification <上次的 classification.json>
+#                              重掃時沿用上次分類：同一筆發現自動帶入上次的
+#                              category/dev_note（標記 carried_from_previous），
+#                              只有新發現留空；上次的 manual_findings 原樣帶入待重新確認
 
-# Step 2（可用 AI 起草）：veros triage —— 依情境庫逐筆判讀並填好報告欄位，全部標記為草稿
-# 或手動：把 Step 1 產出的 classification_skeleton.json 複製成 classification.json，
-# 依 SKILL.md「Step 2」的分類標準，逐筆填入 category（A 已確認需修復 / B 可接受風險 /
-# C 誤報 / D 待確認）與 dev_note；預填的 check/impact/file/lines 不要動（Step 3 會核對）。
-# 另外必填：severity（業界五級）、降級時的 severity_rationale、A 類的 remediation、
-# D 類的 confirm_what/confirm_who/confirm_branches。
-# 判定成立（A/D）與全部 manual_findings 另外要寫報告正文的四段：title（根因+影響的
-# 一句話標題）、explanation（哪個函式、正常該怎麼運作、為何出錯）、impact_detail
-# （具體危害與業務損失）、proof_of_concept（攻擊邏輯或可重現的測試碼）。缺的話報告
-# 會顯示「待補」並在 stdout 列出，不擋產出。
-# 另外依 references/logic_scan.md 的十條情境（權限檢查實作、未保護的狀態變更、
-# 旗標未落實、滑點、價格源…）對每份合約跑一輪邏輯漏洞檢查 —— 這是補 Slither
-# 抓不到的業務邏輯漏洞的步驟；命中的與其他讀碼發現的工具外問題寫進 manual_findings[]
-# （格式範例見 SKILL.md）
+# Step 2：分類。這一步是人工判斷關卡，三種做法
+veros triage                   #  (a) 打 API 逐筆起草，全部標記為草稿
+veros triage --emit-brief      #  (b) 產工單，交給你既有的 agent
+#  (c) 純手工：把 classification_skeleton.json 複製成 classification.json 自己填
+#      —— 要填什麼見下方「Step 2 要填的欄位」
 
 # Step 2 收尾：機械檢查（共用理由、必填欄位、High 降級／High 判誤報）
 veros review --classification ./audit/scan/classification.json
 
 # Step 3：產出交付報告 + 工作底稿
-# --scan-dir 一次帶出 Step 1 的四個檔案（results_before/classification/scan_env/scope），
-# 個別 --before/--classification/--env/--scope 仍可覆蓋。--out-dir 預設 ./audit/report
 veros report --client "<甲方名稱>" \
   --engagement-from 2026-08-01 --engagement-to 2026-08-14
-# --scan-dir/--overview/--scope-note/--out-dir 都有 audit/ 底下的預設值，通常不用給
-# 誤報（C）預設不列進報告，要逐筆列出加 --include-false-positives
+#   --scan-dir/--overview/--scope-note/--out-dir 都有 audit/ 底下的預設值，通常不用給
+#   --include-false-positives  把誤報（C）也逐筆列進報告（預設不列）
+#   --skip-pdf                 只產 report.md，不轉 PDF
 ```
 
-`report` 的 `--classification` / `--env` / `--scope` / `--overview` / `--scope-note` 都是選填 —— 沒提供時，報告對應章節會註明「未提供」而不是報錯，方便只想快速看一次掃描結果、還不想走完整分類流程的情境。`--overview` 的內容進「摘要」章（協定怎麼運作、
-資產保管、角色與權限），`--scope-note` 進「檢測範圍與方法」章末尾，用來揭露這次掃描偏離標準程序之處
-（例如為了讓工具跑起來而暫時改過原始碼，使部分檔案雜湊與交付版本不符）。
+### 人工確認
+
+AI 起草的分類要逐筆簽核過，閘門才會把報告判為可交付：
+
+```bash
+veros confirm --list          # 還有哪些待確認
+veros confirm ISL-02 ISL-03   # 確認你已經讀過的（可一次給多筆編號）
+veros report                  # 重新評定，產出乾淨版面的報告
+```
+
+`veros report` 的 **exit code 就是交付閘門**：`0` = 可交付；`3`／`4` = 不可交付（報告照常產出，但開頭
+帶「內部工作版本」標記，僅供內部追蹤）；`2` = 驗證失敗，不產出報告。完整判定規則見
+`references/severity_grading.md`。
+
+### Step 2 要填的欄位
+
+從 Step 1 產出的 `classification_skeleton.json` 開始，**不要手打**。skeleton 已預填每筆的
+`id`/`check`/`impact`/`file`/`lines`/`description`，**預填的 `check`/`impact`/`file`/`lines` 不要動** ——
+Step 3 會逐筆核對，不一致直接拒絕產報告。
+
+每筆都要填：
+
+- `category`：`A` 已確認需修復／`B` 可接受風險／`C` 誤報／`D` 待確認。**信心不足一律 D，不要猜。**
+- `dev_note`：具體理由，禁止「沒問題」這類空泛字眼。
+- `severity`：業界五級（Critical／High／Medium／Low／Informational），skeleton 已預填工具的對應值。
+- `severity_rationale`：只有判得比工具輕（降級）時必填。
+
+依分類追加：
+
+- `category = A`：`remediation`（怎麼修）
+- `category = D`：`confirm_what`／`confirm_who`／`confirm_branches` 三格。**D 類不得停在問句。**
+
+判定成立的發現（`category = A`／`D` 與全部 `manual_findings`）另外要寫報告正文的四段：`title`（根因 +
+影響的一句話標題，不是 detector 名稱）、`explanation`（哪個函式、正常該怎麼運作、為何出錯）、
+`impact_detail`（具體危害與業務損失）、`proof_of_concept`（攻擊邏輯或可重現的測試碼）。缺的話報告會
+顯示「待補」並在 stdout 列出，不擋產出。
+
+**還要另外跑一輪邏輯漏洞掃描**：依 `references/logic_scan.md` 的十條情境（權限檢查的實作、未保護的狀態
+變更、旗標未落實、滑點、價格源…）對每一份合約跑過，這是補 Slither 抓不到的業務邏輯漏洞的步驟。命中的
+情境與其他讀碼發現的工具外問題寫進 `manual_findings[]`（格式範例見 `SKILL.md`），覆蓋紀錄寫進
+`scenario_coverage`。完整的分類標準與欄位定義以 `SKILL.md`「Step 2」為準。
+
+### 只想快速看一次掃描結果
+
+`veros report` 的 `--classification`／`--env`／`--scope`／`--overview`／`--scope-note` 都是選填 —— 沒提供時
+報告對應章節會註明「未提供」而不是報錯。所以可以只跑 `veros scan` 再直接 `veros report`，先看一眼掃描
+結果，之後再回頭走完整分類流程。`--overview` 的內容進「摘要」章（協定怎麼運作、資產保管、角色與權限），
+`--scope-note` 進「檢測範圍與方法」章末尾，用來揭露這次掃描偏離標準程序之處（例如為了讓工具跑起來而
+暫時改過原始碼，使部分檔案雜湊與交付版本不符）。
 
 ### CLI 子指令細節
 
@@ -280,7 +360,7 @@ python3 -m pip install --user --break-system-packages "fpdf2>=2.8.4,!=2.8.7" mat
 
 `test-fixtures/` 底下是兩組已知答案的迴歸測試樣本，合約與掃描結果都是刻意設計、事先寫死的，
 用來驗證這套 kit 本身的判級邏輯有沒有被改壞，不是要交付的產品合約。兩組合起來覆蓋交付閘門
-的兩側，各自附一份完整跑完 Step 1～4 產出的報告：
+的兩側，各自附一份完整跑完 Step 0～3 產出的報告：
 
 - **vulnerable-vault** — 不可交付（閘門 exit 4）的 ground truth，未加抑制註解。
   合約與已知漏洞明細見 `test-fixtures/vulnerable-vault/VULNERABILITY_CATALOG.md`。
